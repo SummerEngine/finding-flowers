@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Small Hours · flower</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden;cursor:crosshair;touch-action:none;-webkit-user-select:none;user-select:none}canvas{display:block;width:100vw;height:100vh}</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script src="lib/engine.js"></script>
+<script src="lib/flora.js"></script>
+<script src="lib/music.js"></script>
+<script>
+'use strict';
+// One flower, grown by touch. Keys 1-6 change the species, R starts over, M mutes.
+const cv = document.getElementById('c'), ORDER = ['peony', 'anemone', 'lily', 'iris', 'bell', 'daisy'], STAGES = [0, 0.04, 0.2, 0.38, 0.52, 0.68, 0.84, 1];
+G.init(cv, { rows: 124, cols: 150, portraitRows: 150, origin: [0.5, 0.9] });
+let stars = [], lastGrow = 0, plant = null, stage = 0, done = false, caption = null, first = false, mouse = { u: 0, v: -999, on: false }, T = 0, last = 0;
+const hash = location.hash.match(/^#grown(?:=(\w+))?/);
+function setPlant(species, grown) {
+  const sp = Flora.SPECIES[species], sc = Math.min(1, G.S.halfU * 2 / 78, (G.S.oy - 6) / (sp.H + 34));
+  plant = Flora.make(species, { x: 0, y: 0, z: 0, scale: sc, id: 0, yaw: 0.15, turn: 0.35, ph: 0 });
+  stage = grown ? STAGES.length - 1 : 0; plant.g = plant.tg = STAGES[stage]; done = grown;
+}
+setPlant(hash && hash[1] && Flora.SPECIES[hash[1]] ? hash[1] : 'peony', !!hash);
+M.onStep((step, bar, s, ch, t) => {
+  const p = plant; if (!p || p.g < 0.2) return;
+  const d = p.sp.pat[s];
+  if (d >= 0 && Math.random() < 0.3 + 0.55 * p.g) {
+    M.play('flower', t, M.pent(p.sp.reg + d + M.SH[ch]), (0.22 + 0.3 * p.g) * (0.7 + 0.3 * Math.random()), 0);
+    M.vis(t, () => G.wave(p.x + (Math.random() - 0.5) * 30 * p.scale, p.y + p.sp.H * p.scale * (0.7 + Math.random() * 0.5), { sp: 22, w: 2.6, a: 0.5, life: 0.9, obj: 0 }));
+  }
+  if (p.g > 0.5 && s === 0) M.play('sub', t, M.ROOT[ch], 0.4 + 0.5 * p.g);
+  if (p.g > 0.8 && (s === 6 || s === 14) && Math.random() < 0.5) M.play('glass', t, M.CHT[ch][(Math.random() * 4) | 0] + 12, 0.35, (Math.random() - 0.5));
+});
+function tap(e) {
+  M.init(); first = true; const { u, v } = G.toUV(e), own = G.pick(u, v), p = plant;
+  if (!own && stage > 0) { stars.push({ u, v: Math.round(v), ph: Math.random() * 6, fl: 1, ch: '+*.'[(Math.random() * 3) | 0] }); if (stars.length > 80) stars.shift(); M.sing('star', M.pent(10 + ((v / 12) | 0)), 0.7, G.clamp(u / 80, -0.8, 0.8)); return; }
+  lastGrow = T;
+  const grew = stage < STAGES.length - 1; if (grew) { stage++; p.tg = STAGES[stage]; }
+  const node = own ? Flora.node(own) : 0, midi = M.pent(p.sp.reg + (node * 3) % 7);
+  G.wave(u, v, { obj: 0, life: 2.6 }); Flora.kick(p, u > p.x ? -1 : 1, T);
+  let t = M.sing('flower', midi, 0.9, 0); M.echo('flower', midi, 0.3);
+  for (let i = 1; i <= 4; i++) { t += M.STEP / 2 * (1 + (i & 1)); M.play('flower', t, M.fit(M.pent(p.sp.reg + ((node + i) * 3) % 7), M.chAt(t)), 0.5 - i * 0.08, (i & 1 ? 0.4 : -0.4)); }
+  if (grew && M.on) {
+    M.swell(M.now, 0);
+    if (stage === STAGES.length - 1) { done = true; caption = { a: p.name, b: 'AWAKE', t0: T }; M.CHT[M.chAt(M.now + 1)].forEach((n, i) => M.play('tent', M.quant(M.now + 0.9 + i * M.STEP * 2), n + 12, 0.5, 0)); }
+  }
+}
+let down = false;
+cv.addEventListener('pointerdown', e => { e.preventDefault(); M.init(); down = true; });
+cv.addEventListener('pointerup', e => { if (down) tap(e); down = false; });
+cv.addEventListener('pointermove', e => { const p = G.toUV(e); mouse.u = p.u; mouse.v = p.v; mouse.on = e.pointerType === 'mouse'; });
+cv.addEventListener('pointerleave', () => { mouse.on = false; });
+addEventListener('keydown', e => {
+  const i = '123456'.indexOf(e.key); if (i >= 0) setPlant(ORDER[i], false);
+  if (e.key === 'r' || e.key === 'R') setPlant(plant.species, false);
+  if (e.key === 'm') M.mute();
+});
+function frame(ms) {
+  const now = ms / 1000, dt = Math.min(0.05, now - last || 0.016); last = now; T = now;
+  M.flush(); M.bed.pad = 0.15 + 0.85 * plant.g; M.bed.air = plant.g > 0.8 ? 1 : 0;
+  plant.g += (plant.tg - plant.g) * (1 - Math.exp(-dt * 1.1)); if (Math.abs(plant.tg - plant.g) < 0.001) plant.g = plant.tg;
+  // once seeded it keeps growing on its own; a touch hurries it
+  if (stage > 0 && stage < STAGES.length - 1 && T - lastGrow > 7) { lastGrow = T; stage++; plant.tg = STAGES[stage]; if (M.on) { M.swell(M.now, 0, 0.03); M.sing('flower', M.pent(plant.sp.reg + stage), 0.5, 0); } if (stage === STAGES.length - 1) { done = true; caption = { a: plant.name, b: 'AWAKE', t0: T }; } }
+  G.begin(T); G.tickWaves();
+  for (const s of stars) { s.fl = Math.max(0, s.fl - dt * 0.9); G.plot(s.u, s.v, -1e6, G.col('#dfe8ff'), s.ch, Math.min(1, 0.35 + 0.3 * Math.sin(T * 1.3 + s.ph) + s.fl), s.fl); }
+  if (stage === 0) G.plot(0, 0.5, 0, G.col('#dfe8ff'), '.', 0.16 + 0.12 * Math.sin(T * 1.6), 0);
+  Flora.draw(plant, T); G.shade();
+  const ctx = G.end(), S = G.S, own = mouse.on ? G.pick(mouse.u, mouse.v) : 0;
+  if (own) {
+    const [px, py] = G.px(mouse.u, mouse.v), bw = S.cellH * 3, bh = S.cellH * 2.2, k = S.cellH * 0.7, node = Flora.node(own);
+    ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = Math.max(1, S.DPR * 0.75); ctx.beginPath();
+    [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([sx, sy]) => { const X = px + sx * bw, Y = py + sy * bh; ctx.moveTo(X - sx * k, Y); ctx.lineTo(X, Y); ctx.lineTo(X, Y - sy * k); });
+    ctx.stroke(); ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(255,255,255,.82)';
+    ctx.fillText(`${done ? plant.name : '· · · ·'} · ${String(node).padStart(2, '0')}`, px + bw + S.cellH, py - S.cellH * 0.8);
+    ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.fillText(`${M.NOTE(M.pent(plant.sp.reg + (node * 3) % 7))}  ${plant.g.toFixed(2)}/1.00`, px + bw + S.cellH, py + S.cellH * 0.8);
+  }
+  if (caption) {
+    const k = T - caption.t0, al = k < 0.6 ? k / 0.6 : k > 4 ? 1 - (k - 4) / 1.5 : 1;
+    if (al <= 0) caption = null; else { ctx.textAlign = 'left'; ctx.fillStyle = `rgba(255,255,255,${0.6 * al})`; ctx.fillText(caption.a, S.cellH * 4, S.H - S.cellH * 5.5); ctx.fillStyle = `rgba(255,255,255,${0.32 * al})`; ctx.fillText(caption.b, S.cellH * 4, S.H - S.cellH * 3.8); }
+  }
+  if (!first && T > 1.5) { ctx.textAlign = 'center'; ctx.fillStyle = `rgba(255,255,255,${0.28 * Math.min(1, (T - 1.5) / 2)})`; ctx.fillText(G.S.portrait ? 'tap the dark' : 'click the dark', S.W / 2, S.H - S.cellH * 3); }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

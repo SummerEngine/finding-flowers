@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Small Hours · species sheet</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block;width:100vw;height:100vh}</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script src="lib/engine.js"></script>
+<script src="lib/flora.js"></script>
+<script src="lib/species2.js"></script>
+<script>
+'use strict';
+// Contact sheet for judging species. sheet.html#tulip,poppy,dahlia;g=1;yaw=0.2;scale=0.7
+// g = growth 0..1 (try 0.2, 0.45, 0.7, 1), yaw = fixed facing in radians, scale = plant size. No hash = first four species.
+const parts = decodeURIComponent(location.hash.slice(1)).split(';'), opt = { g: 1, yaw: 0.15, scale: 0.7 };
+parts.slice(1).forEach(p => { const [k, v] = p.split('='); opt[k] = +v; });
+const names = (parts[0] ? parts[0].split(',') : Object.keys(Flora.SPECIES).slice(0, 4)).filter(n => Flora.SPECIES[n]);
+G.init(document.getElementById('c'), { rows: 110, cols: 60 * names.length, origin: [0.5, 0.94] });
+const plants = names.map((n, i) => Flora.make(n, { x: (i - (names.length - 1) / 2) * 62, scale: opt.scale, id: i, yaw: opt.yaw, turn: 0, sway: 0.3, ph: 0, g: opt.g, tg: opt.g }));
+function frame(ms) {
+  G.begin(ms / 1000); plants.forEach(p => Flora.draw(p, ms / 1000)); G.shade(); const ctx = G.end(), S = G.S;
+  ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(255,255,255,.6)';
+  plants.forEach(p => { const [x] = G.px(p.x, 0); ctx.fillText(p.species + '  g=' + opt.g, x, S.H - S.cellH * 1.5); });
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
