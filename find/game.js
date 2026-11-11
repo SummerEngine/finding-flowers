@@ -180,7 +180,8 @@ function lookBy(dyaw, dtilt) {
 document.addEventListener('pointerlockchange', () => { locked = document.pointerLockElement === cv; if (!locked) for (const k in keys) keys[k] = false; });
 document.addEventListener('mousemove', e => { if (locked && started && !Book.on && !sleeping) lookBy(e.movementX * 0.0024, e.movementY * 0.0024); });
 cv.addEventListener('pointerdown', e => {
-  e.preventDefault(); if (ptr.down && e.pointerId !== ptr.id) return; ptr.id = e.pointerId; M.init(); const x = e.clientX * G.S.DPR, y = e.clientY * G.S.DPR;
+  e.preventDefault(); try { window.focus(); } catch (x) {} // preventDefault stops the click from focusing a frame, so the keys would stay with the page around the game
+  if (ptr.down && e.pointerId !== ptr.id) return; ptr.id = e.pointerId; M.init(); const x = e.clientX * G.S.DPR, y = e.clientY * G.S.DPR;
   ptr.down = true; ptr.mode = null; ptr.mouse = e.pointerType === 'mouse'; ptr.lx = x; ptr.ly = y; ptr.x = ptr.sx = x; ptr.y = ptr.sy = y; ptr.t0 = performance.now(); ptr.btn = locked ? null : UI.hit(x, y); ptr.grab = false;
   if (ptr.mouse && started && !Book.on && !locked && !ptr.btn) { ptr.grab = true; try { const pr = cv.requestPointerLock(); if (pr && pr.catch) pr.catch(() => {}); } catch (x) {} } else if (!locked) try { cv.setPointerCapture(e.pointerId); } catch (x) {}
 });
@@ -307,9 +308,9 @@ const STORY = [['my grandmother kept a notebook of flowers.'], ['she found them 
 const GROW = [0.03, 0.12, 0.26, 0.42, 0.58, 0.76, 1];
 let seedPlant = null, seedStage = 0;
 function nightLine() { if (count() === SPOTS.length) return say(`night ${night}. every page is full.`, true); const k = openTonight(); say(`night ${night}. ${k} ${k === 1 ? 'flower is' : 'flowers are'} open tonight.`, true); }
-function enterForest(fresh) { // a new walker arrives kneeling at the flower they just opened
+function enterForest(fresh) { // a new walker arrives standing a few steps from the flower they just opened: it is the first page, already written
   started = true; fade = 1; fadeTo = 0; pulses = []; const s = spots[0];
-  if (fresh && !found.peony) { s.state = 'bloom'; s.stage = GROW.length - 1; const p = mkPlant(s, 0, 0, 0); p.g = p.tg = 1; s.plants = [p]; player.x = 0; player.z = 300; kneelAt(s); const g = goal; player.x = g.x; player.z = g.z; goal = null; g.fn(); player.yaw = kneel.yaw; player.eye = kneel.eye; tut = -1; }
+  if (fresh && !found.peony) { s.state = 'bloom'; s.stage = GROW.length - 1; const p = mkPlant(s, 0, 0, 0); p.g = p.tg = 1; s.plants = [p]; found.peony = { night, place: WHERE[placeAt(s.def.x, s.def.z)], kept: 'left' }; s.state = 'noted'; save(); standUp(); player.x = 0; player.z = 320; player.yaw = 0; tiltT = 0; tut = 0; lookSum = 0; }
   else pulse(player.x, player.z, 0.9, 420, 1700);
 }
 function beginGame() { M.init(); if (!seenIntro && count() === 0 && night === 1) { intro = { i: 0, t0: T + 0.5, n: 0 }; tut = 0; } else { enterForest(!found.peony); if (found.peony) { nightLine(); setTimeout(() => guide(true), 3500); } } }
@@ -317,7 +318,7 @@ function openTap(px, py) { // the first flower answers a touch exactly as every 
   const p = seedPlant; if (!p) return; M.init(); const { u, v } = G.toUV({ clientX: px / G.S.DPR, clientY: py / G.S.DPR }), pn = pan(u), reg = regOf('peony'), node = 3 + ((T * 7) | 0) % 9;
   G.wave(u, v, { obj: 1, life: 2.4 }); Flora.kick(p, u > 0 ? -1 : 1, T);
   if (p.tg >= 1) { motifPlay('peony', M.now, 0.8, pn, 0); return; } // open: it sings its whole phrase
-  seedStage = Math.min(GROW.length - 1, seedStage + 1); p.tg = GROW[seedStage];
+  seedStage = GROW.length - 1; p.tg = GROW[seedStage]; // one touch: it opens all the way
   if (M.on) { let t = M.quant(M.now); voicePlay('peony', t, M.fit(M.pent(reg + (node * 3) % 7), M.chAt(t)), 0.8, pn); for (let i = 1; i <= 2 + Math.min(3, seedStage); i++) { t += M.STEP * (1 + (i & 1)); voicePlay('peony', t, M.fit(M.pent(reg + ((node + i) * 3) % 8), M.chAt(t)), 0.55 - i * 0.07, pn + (i & 1 ? 0.35 : -0.35)); } M.swell(M.now, pn, 0.03);
     if (seedStage === GROW.length - 1) { motifPlay('peony', M.now + 1.6, 0.9, 0, 0); if (typeof STEPS !== 'undefined') STEPS.found(M.now + 1.2, 0); } }
 }
@@ -442,7 +443,7 @@ function hud(S, inBook, prompt) {
   }
   if (!started && !intro && seedPlant) { // the opening: a seed and one word, then the name once it has opened
     const g = seedPlant.g, yb = H - m * 2;
-    if (seedStage === 0 && T > 2) UI.text(ptr.mouse ? 'click it' : 'tap it', W / 2, yb - fs * 2, 0.5 + 0.3 * Math.sin(T * 2.4), 'center');
+    if (seedStage === 0) UI.btn(ptr.mouse ? 'click the bud' : 'tap the bud', W / 2, yb - UI.bh, () => openTap(W / 2, H / 2), 'c', 1, ' ');
     if (g > 0.8) { const al = clamp((g - 0.8) / 0.1, 0, 1); UI.text('F I N D I N G   F L O W E R S', W / 2, yb - UI.bh - fs * 3.2, 0.95 * al, 'center'); UI.btn(count() || seenIntro ? 'go on' : 'begin', W / 2, yb - UI.bh, beginGame, 'c', al, ' '); }
   }
   if (fade > 0.01) { ctx.fillStyle = `rgba(0,0,0,${Math.min(1, fade)})`; ctx.fillRect(0, 0, W, H); if (sleeping && fade > 0.7) { const al = (fade - 0.7) / 0.3, k = Object.values(found).filter(f => f.night === night).length; UI.text(`night ${night + 1}`, W / 2, H / 2 - fs, al * 0.85, 'center'); UI.text(k ? `${k} ${k === 1 ? 'page' : 'pages'} written tonight` : 'i slept. that is allowed.', W / 2, H / 2 + fs * 1.2, al * 0.45, 'center'); } }
