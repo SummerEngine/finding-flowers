@@ -48,6 +48,7 @@ function motifPlay(sp, t0, vel, pn, variant, inScore) {
 let met = {}, night = 1, found = {}, stars = [], spots = [], band = [], T = 0, last = 0, started = false, ended = false, fade = 1, fadeTo = 0, sleeping = false;
 const player = { x: 0, z: 150, yaw: 0, vf: 0, still: 0, walking: false, phase: 0, eye: EYE };
 const FID = 5000; // flower ids start here, above every scenery item
+const BIG = 1.3; // how large a flower stands: a little larger than life, so it reads from a few steps away
 let mode = 'walk', kneel = null, goal = null, mark = null, idle = 0, moved = false;
 const keys = {}, ptr = { down: false, x: 0, y: 0, lx: 0, ly: 0, t0: 0, sx: 0, sy: 0, btn: null, mode: null, mouse: !(window.matchMedia && matchMedia('(pointer: coarse)').matches) };
 let stageLights = null, locked = false, skyT = 0, aim = 0, stepD = 0, tiltT = 0, intro = null, tut = 3, coach = null, lookSum = 0, walkSum = 0, guideFx = null, seenIntro = false;
@@ -59,7 +60,7 @@ function load() { try { const d = JSON.parse(localStorage.getItem('findingflower
 function mkStar(az, el, gx, gz, fl, mine) { return { az, el, gx, gz, mine, ph: rnd() * 6, sp: 0.5 + rnd() * 1.6, fl, ch: mine ? '+*'[(rnd() * 2) | 0] : '.', midi: M.pent(10 + clamp((el * 9) | 0, 0, 9)), su: 1e9, sv: 0 }; }
 function say(text, force) { if (thought && !force && T - thought.t0 < 2) return; thought = { text, t0: T, note: !!force }; }
 const bloomCol = sp => { const m = Flora.SPECIES[modelOf(sp)].mats; return G.col(m[Object.keys(m)[0]].ramp[2]); };
-function mkPlant(s, k, x, z) { const model = modelOf(s.def.sp); return Flora.make(model, { scale: 1.15, id: FID + s.i * 4 + k, yaw: (rnd() - 0.5) * 0.5, turn: 0.3, x, y: 0, z }); }
+function mkPlant(s, k, x, z) { const model = modelOf(s.def.sp); return Flora.make(model, { scale: BIG, id: FID + s.i * 4 + k, yaw: (rnd() - 0.5) * 0.5, turn: 0.3, x, y: 0, z }); }
 function startNight(first) {
   buildWorld(SPOTS); V.night = night; V.moonF = clamp(0.1 + (night - 1) * 0.16, 0.1, 1); V.moonAwake = false; V.homeLit = false; V.fireK = 0; V.ML = 0; visited = {}; pulses = []; skyT = 0;
   V.cut = SPOTS.filter(d => found[d.sp] && found[d.sp].kept === 'cut').map(d => bloomCol(d.sp));
@@ -110,7 +111,7 @@ function wake(it, u, v, node) {
 }
 // come down to a flower: walk to a point in front of it, then lower the eye to its height
 function kneelAt(s, then) {
-  const def = s.def, buds = s.state === 'buds' || (s.state === 'glim' && def.cond === 'listen'), sp = Flora.SPECIES[modelOf(def.sp)], hgt = sp.H * 1.15;
+  const def = s.def, buds = s.state === 'buds' || (s.state === 'glim' && def.cond === 'listen'), sp = Flora.SPECIES[modelOf(def.sp)], hgt = sp.H * BIG;
   standUp(); let dx = player.x - def.x, dz = player.z - def.z, d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d; if (def.x + dx * 200 < CR1 + 60) { dx = 1; dz = 0; }
   const D = buds ? 225 : 78 + 0.72 * hgt + (G.S.portrait ? 30 : 0);
   const sit = () => { mode = 'kneel'; const dd = Math.hypot(def.x - player.x, def.z - player.z), ey = clamp(buds ? 62 : hgt * 0.56, 40, 104); tiltT = buds ? 0 : clamp(-Math.atan2(hgt * 0.95 - ey, dd) * 0.85, -0.9, 0.3); kneel = { s, free: false, eye: clamp(buds ? 62 : hgt * 0.56, 40, 104), yaw: Math.atan2(def.x - player.x, -(def.z - player.z)) }; if (then) then(); };
@@ -142,7 +143,22 @@ function choose(s) { // "this one"
 }
 function note(s) { const def = s.def; found[def.sp] = { night, place: WHERE[placeAt(def.x, def.z)], kept: def.home ? 'left' : null }; s.state = 'noted'; save(); Book.open(s.i, true); motifPlay(def.sp, M.now + 1.2, 0.7, 0, 0); }
 function sleep() { if (sleeping) return; sleeping = true; fadeTo = 1; standUp(); if (M.on) M.sing('moon', M.pent(7), 0.6, 0); setTimeout(() => { night++; save(); startNight(false); sleeping = false; fadeTo = 0; }, 2600); }
+// the dark is only asleep: what a wave of light reaches wakes and stays lit, nearest first, like a ring spreading
+const WAKES = { tree: 1, reed: 1, shroom: 1, pad: 1, fern: 1, tuft: 1, stone: 1, bush: 1, log: 1, flies: 1 };
+function bloomAround(x, z, R, trees) {
+  const near = items.filter(it => !it.hidden && !it.sky && !it.awake && WAKES[it.type] && Math.hypot(it.x - x, it.z - z) < R).sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z)); let nt = 0;
+  for (const it of near) { if (it.type === 'tree' && ++nt > trees) continue; setTimeout(() => { it.awake = true; it.flash = 1; if (it.type === 'flies' || it.type === 'pad') it.t0 = T; }, Math.hypot(it.x - x, it.z - z) / 0.46); }
+}
+// the first thing a new walker does: touch the ground, and the forest around them lights and grows
+function firstLight() {
+  tut = 1; coach = { at: T + 5, until: T + 17 }; walkSum = 0; const x = player.x, z = player.z;
+  for (let i = 0; i < 4; i++) setTimeout(() => pulse(x, z, 1 - i * 0.18, 460, 2600), i * 520);
+  bloomAround(x, z, 1150, 6);
+  if (M.on) { M.swell(M.now, 0, 0.05, 500, 1800, 2.6); [0, 2, 4, 7, 9, 11].forEach((d, i) => M.play('star', M.quant(M.now + i * M.STEP * 2), M.fit(M.pent(6 + d), M.chAt(M.now)), 0.42 - i * 0.03, i & 1 ? 0.45 : -0.45)); M.play('sub', M.quant(M.now), M.ROOT[M.chAt(M.now)], 0.8); }
+  say('the dark is only asleep. it wakes where i touch it.', true);
+}
 function tap(px, py) {
+  if (tut === 0 && started && !intro) return firstLight(); // the first touch only wakes the forest, whatever it lands on
   const S = G.S, { u, v } = G.toUV({ clientX: px / S.DPR, clientY: py / S.DPR }), R0 = (S.COLS - S.ox) * A, bot = -(S.ROWS - S.oy);
 
   // flowers first: a light on the ground, or a plant
@@ -167,7 +183,7 @@ function tap(px, py) {
   if (ry / rl < -0.02) { // the ground: walk there. the water: a ring
     const t = Math.min(CAM.y / -ry, 1300 / Math.hypot(u, rf)), fw = rf * t, xr = u * t, x = CAM.x + CAM.sy * fw + CAM.cy * xr, z = CAM.z - CAM.cy * fw + CAM.sy * xr;
     if (x < CR1) { ripple(x, z, 1); M.sing('drip', M.pent(3 + ((u + 80) / 22 | 0)), 0.8, pan(u)); return; }
-    pulse(x, z, 0.75, 640, 950); mark = { x, z, t0: T }; if (!locked && !ptr.mouse) { standUp(); goal = { x, z, stop: 14 }; }
+    pulse(x, z, 0.75, 640, 950); bloomAround(x, z, 300, 2); mark = { x, z, t0: T }; if (!locked && !ptr.mouse) { standUp(); goal = { x, z, stop: 14 }; }
   }
 }
 // input. mouse: click to capture it, then look with it and click what is at the centre mark.
@@ -258,7 +274,7 @@ function drawSpots(dt) {
       if (open && condMet(s)) { s.state = 'glim'; s.t0 = T; if (M.on && d < 1500) M.sing('star', M.pent(12), 0.5, 0); }
       else if (open && d < 520 && NEAR_HINT[def.cond] && T - lastHint > 16) { lastHint = T; say(NEAR_HINT[def.cond]); }
     }
-    if (mode === 'walk' && !goal && d < 250 && open && player.still > 0.3 && s.state !== 'hidden' && s.state !== 'cut' && s.state !== 'noted' && T - (s.left || -9) > 4) kneelAt(s, s.state === 'glim' ? () => touchSpot(s, 0, 0, 0, 0) : null);
+    if (mode === 'walk' && !goal && d < 340 && open && player.still > 0.3 && s.state !== 'hidden' && s.state !== 'cut' && s.state !== 'noted' && T - (s.left || -9) > 4) kneelAt(s, s.state === 'glim' ? () => touchSpot(s, 0, 0, 0, 0) : null);
     if (s.state === 'glim') { // a small light near the ground, seen from far off
       if (!PR.proj(def.x, 9, def.z)) continue; s.vis = true; if (started && found.peony && tut > 2 && mode === 'walk' && !visited.glim && !thought && night === 1) { visited.glim = 1; say('something small is shining over there. touch it.'); } s.su = PR.u; s.sv = PR.v; const own = (FID + s.i * 4 + 1) << 8, a = (0.6 + 0.4 * Math.sin(T * 3 + s.i)) * clamp(1.25 - d / 3200, 0, 1), z = PR.z, sc = PR.s;
       G.plot(PR.u, PR.v, z, COL.white, '*', a, 0.6 * a, own); G.plot(PR.u - A, PR.v, z, COL.amber, '-', a, 0.3 * a, own); G.plot(PR.u + A, PR.v, z, COL.amber, '-', a, 0.3 * a, own); G.plot(PR.u, PR.v + 1, z, COL.amber, '|', a, 0.3 * a, own); G.plot(PR.u, PR.v - 1, z, COL.amber, '|', a * 0.8, 0.2 * a, own); if (sc > 0.3) { G.plot(PR.u - A, PR.v, z, COL.star, '.', a * 0.7, 0, own); G.plot(PR.u + A, PR.v, z, COL.star, '.', a * 0.7, 0, own); G.plot(PR.u, PR.v + 1, z, COL.star, "'", a * 0.6, 0, own); }
@@ -276,7 +292,7 @@ function drawSpots(dt) {
     if (main && PR.proj(def.x, main.sp.H * 0.7, def.z)) { s.vis = true; s.su = PR.u; s.sv = PR.v; if (d > 1300 && (s.state === 'bloom' || s.state === 'noted')) { const own = (FID + s.i * 4 + 1) << 8, a = 0.85 * clamp(1.3 - d / 3400, 0, 1); G.plot(PR.u, PR.v, PR.z, bloomCol(def.sp), '*', a, 0.25, own); G.plot(PR.u, PR.v - 1, PR.z, COL.stem, '|', a * 0.5, 0, own); } }
     if (s.state === 'grow' && main && main.g > 0.985) { s.state = 'bloom'; for (let i = 0; i < 3; i++) setTimeout(() => pulse(def.x, def.z, 1 - i * 0.2, 520, 2600), i * 450); motifPlay(def.sp, M.now, 0.9, 0, 0); if (typeof STEPS !== 'undefined' && M.on) STEPS.found(M.now, 0); if (s.vis) G.wave(s.su, s.sv, { obj: main.id + 1, life: 3, sp: 26 }); say('it is open. i write it down before i forget how it looks.', true); }
     if (main && d < 2400 && (s.state === 'bloom' || s.state === 'noted' || (s.state === 'grow' && main.g > 0.18))) band.push({ spot: s, p: main, su: s.vis ? s.su : 0, d, lv: s.state === 'grow' ? 0.35 + 0.65 * main.g : 1 });
-    if (here || d < 420) { if (s.state === 'bloom') prompt = { label: 'note it down', fn: () => note(s) }; else if (s.state === 'buds') prompt = s.sel >= 0 ? { label: 'this one', fn: () => choose(s), alt: { label: 'hum it', fn: () => motifPlay(def.sp, M.now, 0.8, 0, 0) } } : { label: 'hum it', fn: () => motifPlay(def.sp, M.now, 0.8, 0, 0) }; }
+    if (here || d < 520) { if (s.state === 'bloom') prompt = { label: 'note it down', fn: () => note(s) }; else if (s.state === 'buds') prompt = s.sel >= 0 ? { label: 'this one', fn: () => choose(s), alt: { label: 'hum it', fn: () => motifPlay(def.sp, M.now, 0.8, 0, 0) } } : { label: 'hum it', fn: () => motifPlay(def.sp, M.now, 0.8, 0, 0) }; }
     if (s.state === 'buds' && s.sel >= 0) { const p = s.plants[s.sel]; if (PR.proj(p.x, 4, p.z)) G.plot(PR.u, PR.v, PR.z + 2, COL.white, '^', 0.6 + 0.3 * Math.sin(T * 4)); }
   }
   return prompt;
@@ -287,7 +303,7 @@ const ARRIVES = { owl: 2, heron: 3, deer: 4 }; // who joins the forest on which 
 const NIGHT_NOTE = { 2: 'trees sleep too. i could touch one, and stay to watch.', 3: 'the sky is empty wherever i have not looked. i could touch it.', 4: 'i am not the only one awake tonight.', 5: 'the moon is nearly whole. it might answer.', 6: 'one flower only opens for a woken moon.' };
 function nextSpot() { let t = null, bd = 1e9; for (const s of spots) if (s.def.night <= night && !found[s.def.sp]) { const d = distTo(s.def.x, s.def.z) + (s.state === 'hidden' ? 700 : 0); if (d < bd) { bd = d; t = s; } } return t; }
 function placeGuide() {
-  GUIDE.on = started && !intro && tut >= 2 && !!found.peony && T < GUIDE.until && mode !== 'kneel'; if (!GUIDE.on) return;
+  GUIDE.on = started && !intro && tut >= 2 && !!found.peony && (T < GUIDE.until || (night === 1 && count() < 2)) && mode !== 'kneel'; if (!GUIDE.on) return;
   const t = nextSpot(), tx = t ? t.def.x : 0, tz = t ? t.def.z : 0, dx = tx - player.x, dz = tz - player.z, d = Math.hypot(dx, dz) || 1;
   if (d < 380) { GUIDE.x = tx; GUIDE.z = tz; GUIDE.r = 60; GUIDE.until = Math.min(GUIDE.until, T + 7); } else { const a = Math.min(d - 120, 340); GUIDE.x = player.x + dx / d * a; GUIDE.z = player.z + dz / d * a; GUIDE.r = 24; }
 }
@@ -302,25 +318,25 @@ function drawGuide() {
   const dx = g.tx - player.x, dz = g.tz - player.z, d = Math.hypot(dx, dz) || 1, len = Math.min(d, 1700), n = 60;
   for (let i = 2; i <= n; i++) { const q = i / n, a = Math.exp(-Math.pow((q - k) / 0.1, 2)) + (q < k ? 0.16 * (1.3 - k) : 0); if (a < 0.03) continue; const wob = Math.sin(q * 9 + T * 2) * 12 * q; if (PR.proj(player.x + dx / d * len * q - dz / d * wob, 6, player.z + dz / d * len * q + dx / d * wob)) { G.plot(PR.u, PR.v, PR.z + 5, COL.amber, a > 0.55 ? '*' : '.', Math.min(1, a), a * 0.5); if (a > 0.55) G.plot(PR.u, PR.v + 1, PR.z + 5, COL.warm, "'", a * 0.5); } }
 }
-// ───────── the opening: black, and one seed. you open your first flower yourself; then her notebook speaks
-const STORY = [['my grandmother kept a notebook of flowers.'], ['she found them in this forest, at night,', 'one at a time, for most of her life.'], ['fourteen pages are still empty.'], ['inside the cover she wrote:'],
-  ['"they open in the dark,', 'only for someone who is not in a hurry."'], ['so i have come, with her notebook,', 'to find the ones she did not.'], ['she planted one where i would find it.', 'it is the first page.'], ['this is the first night.']];
+// ───────── the opening: black, and one seed. you open your first flower yourself; then two short pages of why you are here
+const STORY = [['my grandmother kept a notebook of flowers', 'that only bloom at night.'], ['fourteen pages are still empty.', 'i am out here to find them.']];
 const GROW = [0.03, 0.12, 0.26, 0.42, 0.58, 0.76, 1];
 let seedPlant = null, seedStage = 0;
 function nightLine() { if (count() === SPOTS.length) return say(`night ${night}. every page is full.`, true); const k = openTonight(); say(`night ${night}. ${k} ${k === 1 ? 'flower is' : 'flowers are'} open tonight.`, true); }
 function enterForest(fresh) { // a new walker arrives standing a few steps from the flower they just opened: it is the first page, already written
   started = true; fade = 1; fadeTo = 0; pulses = []; const s = spots[0];
-  if (fresh && !found.peony) { s.state = 'bloom'; s.stage = GROW.length - 1; const p = mkPlant(s, 0, 0, 0); p.g = p.tg = 1; s.plants = [p]; found.peony = { night, place: WHERE[placeAt(s.def.x, s.def.z)], kept: 'left' }; s.state = 'noted'; save(); standUp(); player.x = 0; player.z = 320; player.yaw = 0; tiltT = 0; tut = 0; lookSum = 0; }
+  if (ptr.mouse && !locked) try { const pr = cv.requestPointerLock(); if (pr && pr.catch) pr.catch(() => {}); } catch (x) {} // this runs inside the click that ends the story, so the browser allows it
+  if (fresh && !found.peony) { s.state = 'bloom'; s.stage = GROW.length - 1; const p = mkPlant(s, 0, 0, 0); p.g = p.tg = 1; s.plants = [p]; found.peony = { night, place: WHERE[placeAt(s.def.x, s.def.z)], kept: 'left' }; s.state = 'noted'; save(); standUp(); player.x = 0; player.z = 320; player.yaw = 0; tiltT = 0.14; tut = 0; lookSum = 0; }
   else pulse(player.x, player.z, 0.9, 420, 1700);
 }
 function beginGame() { M.init(); if (!seenIntro && count() === 0 && night === 1) { intro = { i: 0, t0: T + 0.5, n: 0 }; tut = 0; } else { enterForest(!found.peony); if (found.peony) { nightLine(); setTimeout(() => guide(true), 3500); } } }
-function openTap(px, py) { // the first flower answers a touch exactly as every flower in the forest does: a step of opening, its own voice, the wave, the answering notes
-  const p = seedPlant; if (!p) return; M.init(); const { u, v } = G.toUV({ clientX: px / G.S.DPR, clientY: py / G.S.DPR }), pn = pan(u), reg = regOf('peony'), node = 3 + ((T * 7) | 0) % 9;
-  G.wave(u, v, { obj: 1, life: 2.4 }); Flora.kick(p, u > 0 ? -1 : 1, T);
-  if (p.tg >= 1) { motifPlay('peony', M.now, 0.8, pn, 0); return; } // open: it sings its whole phrase
-  seedStage = GROW.length - 1; p.tg = GROW[seedStage]; // one touch: it opens all the way
-  if (M.on) { let t = M.quant(M.now); voicePlay('peony', t, M.fit(M.pent(reg + (node * 3) % 7), M.chAt(t)), 0.8, pn); for (let i = 1; i <= 2 + Math.min(3, seedStage); i++) { t += M.STEP * (1 + (i & 1)); voicePlay('peony', t, M.fit(M.pent(reg + ((node + i) * 3) % 8), M.chAt(t)), 0.55 - i * 0.07, pn + (i & 1 ? 0.35 : -0.35)); } M.swell(M.now, pn, 0.03);
-    if (seedStage === GROW.length - 1) { motifPlay('peony', M.now + 1.6, 0.9, 0, 0); if (typeof STEPS !== 'undefined') STEPS.found(M.now + 1.2, 0); } }
+function openTap(px, py) { // one touch is enough: it opens slowly, all the way, in one unbroken motion, with a few quiet notes under it
+  const p = seedPlant; if (!p) return; M.init(); const { u, v } = G.toUV({ clientX: px / G.S.DPR, clientY: py / G.S.DPR }), pn = pan(u);
+  if (seedStage > 0) { if (p.g > 0.99) { G.wave(u, v, { obj: 1, life: 2.4 }); Flora.kick(p, u > 0 ? -1 : 1, T); motifPlay('peony', M.now, 0.8, pn, 0); } return; } // open: it sings its whole phrase. while it opens, it is left alone
+  seedStage = GROW.length - 1; p.tg = 1; G.wave(u, v, { obj: 1, life: 3 });
+  if (M.on) { const reg = regOf('peony'); M.swell(M.now, 0, 0.03, 500, 1800, 5.5);
+    [0, 2, 4, 3, 5, 7].forEach((d, i) => { const t = M.quant(M.now + i * 0.95); voicePlay('peony', t, M.fit(M.pent(reg + d), M.chAt(t)), 0.3 + i * 0.03, i & 1 ? 0.25 : -0.25); });
+    motifPlay('peony', M.now + 6, 0.7, 0, 0); if (typeof STEPS !== 'undefined') STEPS.found(M.now + 5.7, 0); }
 }
 function introTap() {
   const it = intro, full = STORY[it.i].join('').length; if ((T - it.t0) * 24 < full) { it.t0 = T - full / 24 - 0.01; return; }
@@ -339,18 +355,25 @@ function drawIntro(ctx, S) { // large type, one letter at a time, each with its 
 }
 // teaching, one thing at a time, in the world
 function teach() {
-  if (tut > 2 || intro) return;
+  if (intro) return;
+  if (tut > 2) { // after the first steps: only how to open the first flower you come down to
+    const k = mode === 'kneel' && kneel && count() < 2 ? kneel.s.state : null;
+    coach = k === 'grow' || k === 'glim' ? { text: ptr.mouse ? 'click the flower. it opens a little more each time.' : 'tap the flower. it opens a little more each time.' } : null; return;
+  }
   if (tut === -1) { coach = null; if (found.peony && !Book.on) { tut = 0; lookSum = 0; } return; }
-  if (tut === 0 && lookSum > 0.9) { tut = 1; walkSum = 0; }
-  else if (tut === 1 && walkSum > 200) { tut = 2; coach = { until: T + 9 }; guide(true); }
-  else if (tut === 2 && (T > coach.until || mode === 'kneel')) { tut = 3; coach = null; if (mode !== 'kneel') nightLine(); }
-  if (tut < 3) coach = Object.assign(coach || {}, { text: tut === 0 ? (ptr.mouse ? (locked ? 'move the mouse to look around.' : 'click to step into the dark.') : 'drag to look around.') : tut === 1 ? (ptr.mouse ? 'w a s d to walk.' : 'hold your thumb still to walk.') : 'the moth knows where they are. i follow it.' });
+  // 0: touch the ground (firstLight moves on). 1: watch it wake, then walk. 2: the moth leads to the first flower
+  if (tut === 1 && T > coach.at && (walkSum > 160 || T > coach.until)) { tut = 2; coach = { until: T + 40 }; guide(true); }
+  else if (tut === 2 && (T > coach.until || (mode === 'kneel' && kneel.s.state !== 'noted'))) { tut = 3; coach = null; if (mode !== 'kneel') nightLine(); return; }
+  const text = tut === 0 ? (ptr.mouse ? (locked ? 'click the ground.' : 'click to step into the dark.') : 'tap the ground.')
+    : tut === 1 ? (T < coach.at ? '' : ptr.mouse ? 'w a s d to walk. the mouse looks around.' : 'hold your thumb still to walk. drag to look.')
+    : 'follow the moth. it knows where the flowers are.';
+  coach = Object.assign(coach || {}, { text });
 }
 function titleFrame(dt, S) {
   const back = seenIntro || count() > 0;
   if (!seedPlant) { seedPlant = Flora.make('peony', { id: 0, yaw: 0.15, turn: 0.4, ph: 0, g: back ? 1 : 0.03, tg: back ? 1 : 0.03 }); seedStage = back ? GROW.length - 1 : 0; }
   const p = seedPlant, top = S.oy, availH = S.ROWS * 0.66; p.scale = Math.min(1.3, availH / (p.sp.H + 34), S.halfU * 1.7 / 70); p.x = 0; p.y = top - S.ROWS * 0.72; p.z = 0;
-  p.g += (p.tg - p.g) * (1 - Math.exp(-dt * 1.5)); fade = 0; CAM.yaw = 0; CAM.tilt = 0; camSet();
+  p.g = Math.min(p.tg, p.g + dt * 0.17); fade = 0; CAM.yaw = 0; // a steady opening, about six seconds from bud to bloom CAM.tilt = 0; camSet();
   M.bed.pad = 0.15 + 0.7 * p.g; M.bed.water = 0.1; M.bed.air = 0; M.bed.rumble = 0;
   G.begin(T); G.tickWaves(0); G.lit = null; G.warm = null; Flora.cam = null; drawSky(stars, dt);
   if (seedStage === 0) { const a = 0.5 + 0.4 * Math.sin(T * 2.4); G.plot(0, p.y + 1, 1, COL.white, '.', a, 0.3); G.plot(0, p.y + 2, 1, COL.star, "'", a * 0.5); }
@@ -421,7 +444,7 @@ function hud(S, inBook, prompt) {
     const kh = (label, k) => locked ? `${label}  [${k}]` : label;
     UI.btn(kh('book', 'b'), W - m, m, () => Book.open(Math.max(0, SPOTS.findIndex(d => !found[d.sp])), false), 'r', 0.8, 'b');
     // the one thing you can do here
-    const atCamp = mode === 'walk' && tut > 2 && Math.hypot(player.x, player.z) < 330, tonight = Object.values(found).filter(f => f.night === night).length;
+    const atCamp = mode === 'walk' && tut > 2 && Math.hypot(player.x, player.z) < 330, tonight = Object.keys(found).filter(sp => found[sp].night === night && sp !== 'peony').length;
     if (!prompt && atCamp && !sleeping && (tonight > 0 || openTonight() === 0)) prompt = count() === SPOTS.length ? { label: 'play the whole book', fn: () => { Book.open(0, false); Book.whole(); } } : { label: 'rest here until the next night', fn: sleep };
     const y = H - m - UI.bh * 1.15 - (S.portrait ? UI.bh * 1.3 : 0); // the offered action sits low, clear of what you are looking at
     if (prompt) { if (prompt.alt) { UI.btn(kh(prompt.label, 'space'), W / 2 - fs * 0.4, y, prompt.fn, 'r', 1, ' '); UI.btn(kh(prompt.alt.label, 'h'), W / 2 + fs * 0.4, y, prompt.alt.fn, 'l', 1, 'h'); } else UI.btn(kh(prompt.label, 'space'), W / 2, y, prompt.fn, 'c', 1, ' '); }
@@ -434,7 +457,7 @@ function hud(S, inBook, prompt) {
     }
     if (guideFx) { const g = guideFx, dx = g.tx - player.x, dz = g.tz - player.z, fw = dx * CAM.sy - dz * CAM.cy, rt = dx * CAM.cy + dz * CAM.sy, off = fw < 20 || Math.abs(rt / fw) > S.halfU / CAM.f; if (off) { const al = clamp(1.2 - (T - g.t0) / 2.6, 0, 1) * (0.5 + 0.5 * Math.sin(T * 9)); UI.text(rt < 0 ? '<<<' : '>>>', rt < 0 ? m * 2 : W - m * 2, H * 0.5, 0.9 * al, rt < 0 ? 'left' : 'right'); } }
     if (coach && coach.text) { const w = UI.width(coach.text) + fs * 2, cy = H * 0.7; UI.box((W - w) / 2, cy, w, UI.bh, 1); UI.text(coach.text, W / 2, cy + UI.bh / 2 + 1, 0.9, 'center'); }
-    if (thought && !coach) { // a thought: plain words low in the middle, typed, then gone
+    if (thought && !(coach && coach.text)) { // a thought: plain words low in the middle, typed, then gone
       const k = T - thought.t0, n = Math.floor(k * 30), tx = thought.text, full = tx.length, hold = full / 30 + 4, al = k > hold ? 1 - (k - hold) / 1.5 : 1;
       if (thought.note && n > (thought.n || 0) && n <= full) { thought.n = n; if (n % 2 && tx[n - 1] !== ' ' && M.on) M.fm(M.now, M.pent(10 + n % 3), { g: 0.022, dec: 0.05, wave: 'triangle', rv: 0.2 }); } // her notes type themselves with a small sound per letter
       if (al <= 0) thought = null; else { let l1 = tx, l2 = ''; if (UI.width(tx) > W - m * 4) { let cut = tx.lastIndexOf(' ', Math.ceil(full * 0.55)); if (cut < 0) cut = full; l1 = tx.slice(0, cut); l2 = tx.slice(cut + 1); }
