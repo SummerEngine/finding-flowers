@@ -18,7 +18,7 @@ function vnoise(x, y) { const xi = Math.floor(x), yi = Math.floor(y), xf = x - x
 let seed = 11; const sr = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 
 // ───────── the eye
-const EYE = 130, NEAR = 14, CR0 = -2700, CR1 = -1900, HOME = { x: 300, z: -500, r: 3400 }, TID = 8000; // tree part ids start at TID
+const EYE = 130, NEAR = 14, CR0 = -2700, CR1 = -1900, HOME = { x: 300, z: -500, r: 5000 }, TID = 8000; // tree part ids start at TID
 const CAM = { x: 0, y: EYE, z: 150, yaw: 0, sy: 0, cy: 1, f: 88, tilt: 0, ts: 0, tc: 1 };
 // north is -z, east is +x. yaw 0 looks north; turning right is positive.
 const PR = { u: 0, v: 0, z: 0, s: 0, nx: 0, ny: 0, nz: 0,
@@ -38,7 +38,7 @@ let items = [], ripples = [], embers = [], solids = [], MAT = null;
 const firePool = (x, z) => { const k = clamp(1 - Math.hypot(x, z) / 560, 0, 1); return k * k * 0.8 * V.fireK * (0.9 + 0.1 * Math.sin(V.T * 7 + x * 0.02)); };
 let pulses = [], lights = [], lightsN = []; // lights: every open flower holds a pool of light around itself
 function pulse(x, z, a, sp, max) { pulses.push({ x, z, t0: V.T, a: a || 0.6, sp: sp || 720, max: max || 1150 }); if (pulses.length > 16) pulses.shift(); }
-function glow(x, z) { let v = 0; const T = V.T; for (let i = 0; i < lights.length; i++) { const l = lights[i], k = 1 - Math.hypot(x - l.x, z - l.z) / l.r; if (k > 0) { const q = k * k * l.k; if (q > v) v = q; } } for (let i = 0; i < pulses.length; i++) { const p = pulses[i], r = (T - p.t0) * p.sp, d = Math.hypot(x - p.x, z - p.z); if (d > r || d > p.max) continue; const q = p.a * Math.min(1, (r - d) / 160) * Math.exp(-(r - d) / 520) * Math.pow(1 - d / p.max, 0.7); if (q > v) v = q; } return v; }
+function glow(x, z) { let v = firePool(x, z); const T = V.T; for (let i = 0; i < lights.length; i++) { const l = lights[i], k = 1 - Math.hypot(x - l.x, z - l.z) / l.r; if (k > 0) { const q = k * k * l.k; if (q > v) v = q; } } for (let i = 0; i < pulses.length; i++) { const p = pulses[i], r = (T - p.t0) * p.sp, d = Math.hypot(x - p.x, z - p.z); if (d > r || d > p.max) continue; const q = p.a * Math.min(1, (r - d) / 160) * Math.exp(-(r - d) / 520) * Math.pow(1 - d / p.max, 0.7); if (q > v) v = q; } return v; }
 const glowL = (x, z) => { let v = 0; for (let i = 0; i < lights.length; i++) { const l = lights[i]; if (!l.f) continue; const k = 1 - Math.hypot(x - l.x, z - l.z) / l.r; if (k > 0 && k * k * l.k > v) v = k * k * l.k; } return v; }; // light from open flowers only
 const lightAt = (x, y, z) => glow(x, z) * clamp(1.2 - y / 560, 0, 1);
 
@@ -49,6 +49,7 @@ function buildWorld(spotList) {
   items = []; ripples = []; embers = []; solids = []; seed = 11;
   if (!MAT) MAT = {
     bark: G.material({ ramp: ['#3d2f23', '#8a735e', '#c9b49a', '#f6ead6'], mode: 'hatch', ao: 0, amb: 0.1, dif: 0.85, rim: 0.05, spec: 0.1, edge: 0.04, vein: 0.42, fade: 0.9 }),
+    barkUp: G.material({ ramp: ['#3d2f23', '#8a735e', '#c9b49a', '#f6ead6'], mode: 'hatch', ao: 0, amb: 0.1, dif: 0.85, rim: 0.05, spec: 0.1, edge: 0.04, vein: 0.42, fade: 0.25 }),
     leaf: G.material({ ramp: ['#12301f', '#2a6348', '#4f9c70', '#9fd88a'], gl: '.:\'+*&%#', holes: 0.3, hs: 34, ao: 0, amb: 0.1, dif: 0.62, rim: 0.2, spec: 0.08, edge: 0 }),
     sand: G.material({ ramp: ['#2a241a', '#7a6c55', '#cdbfa6', '#fff4dc'], alt: '#5a4f3e', mode: 'hatch', ao: 0, amb: 0.08, dif: 0.75, rim: 0.08, spec: 0.1, edge: 0.1, back: 0.6 }),
     stone: G.material({ ramp: ['#20242a', '#566070', '#9aa4b2', '#e6ecf5'], ao: 0, amb: 0.06, dif: 0.8, rim: 0.1, spec: 0.25, edge: 0.05, flat: 0.5 }),
@@ -68,21 +69,22 @@ function buildWorld(spotList) {
   };
   // the glade: a loose ring north of camp, and trees through the rest of the dark
   for (let i = 0; i < 9; i++) { const a = i / 9 * 6.283 + 0.3, r = 560 + sr() * 160, x = Math.sin(a) * r, z = -1150 - Math.cos(a) * r; if (!keepOut(x, z, 200)) tree(x, z); }
-  for (let n = 0, tries = 0; n < 60 && tries < 1200; tries++) { const x = HOME.x + (sr() - 0.5) * 6200, z = HOME.z + (sr() - 0.5) * 6200; if (Math.hypot(x - HOME.x, z - HOME.z) > HOME.r + 500 || keepOut(x, z) || (x < -500 && z < -1500)) continue; tree(x, z); n++; }
+  for (let n = 0, tries = 0; n < 135 && tries < 3000; tries++) { const x = HOME.x + (sr() - 0.5) * 9600, z = HOME.z + (sr() - 0.5) * 9600; if (Math.hypot(x - HOME.x, z - HOME.z) > HOME.r + 500 || keepOut(x, z) || (x < -500 && z < -1500)) continue; tree(x, z); n++; }
   for (const [x, z] of [[-1050, -1650], [-1500, -1850], [-900, -2150], [-1350, -2450], [-1750, -2250], [-1650, -1500]]) tree(x, z, true);
   // the creek: reeds along the bank, pads on the water, a heron, a boat
   for (let z = -2900; z < 2300; z += 60 + sr() * 100) { const n = 5 + ((sr() * 7) | 0), st = []; for (let i = 0; i < n; i++) st.push({ dx: (sr() - 0.5) * 60, dz: (sr() - 0.5) * 40, h: 40 + sr() * 70, lean: (sr() - 0.5) * 34, top: sr() < 0.45 }); add('reed', CR1 - 20 + sr() * 110, z, { st, reg: 2 + ((sr() * 5) | 0) }); }
   for (let z = -2700; z < 2100; z += 130 + sr() * 170) add('pad', CR1 - 120 - sr() * 420, z, { k: 9, tiny: 1, reg: 6 + ((sr() * 6) | 0) });
   // camp: tent, fire, the jar
 
+  add('fire', 0, 0, { k: 11 }); solids.push({ x: 0, z: 0, r: 55 }); // camp: a small fire to come back to
   // the lantern path east of camp
   for (let i = 0; i < 9; i++) add('lamp', 520 + i * 180, 200 + Math.sin(i * 0.9) * 90, { n: i, reg: 5 + i });
   // the hill to the east: the old stone, a deer
   add('menhir', 2400, -500, { reg: -6 }); solids.push({ x: 2400, z: -500, r: 60 });
   // the forest floor: grass, ferns, stones, night mushrooms
   const scatter = (n, w, ok, make) => { for (let c = 0, t = 0; c < n && t < n * 8; t++) { const x = HOME.x + (sr() - 0.5) * w, z = HOME.z + (sr() - 0.5) * w; if (x < CR1 + 30 || Math.hypot(x, z) < 60 || !ok(x, z)) continue; make(x, z); c++; } };
-  scatter(300, 6400, () => true, (x, z) => { const n = 5 + ((sr() * 4) | 0), st = []; for (let i = 0; i < n; i++) { const a = (i / (n - 1) - 0.5) * 2.4 + (sr() - 0.5) * 0.3, l = 34 + sr() * 30; st.push({ a, l, rot: sr() * 6.283 }); } add('fern', x, z, { small: 1, st, rot: sr() * 3 }); });
-  scatter(46, 5800, (x, z) => !keepOut(x, z, 120), (x, z) => add('stone', x, z, { small: 1, r: 12 + sr() * 22, sq: 0.5 + sr() * 0.4 }));
+  scatter(660, 9800, () => true, (x, z) => { const n = 5 + ((sr() * 4) | 0), st = []; for (let i = 0; i < n; i++) { const a = (i / (n - 1) - 0.5) * 2.4 + (sr() - 0.5) * 0.3, l = 34 + sr() * 30; st.push({ a, l, rot: sr() * 6.283 }); } add('fern', x, z, { small: 1, st, rot: sr() * 3 }); });
+  scatter(105, 9000, (x, z) => !keepOut(x, z, 120), (x, z) => add('stone', x, z, { small: 1, r: 12 + sr() * 22, sq: 0.5 + sr() * 0.4 }));
   for (const [x, z] of [[900, 420], [1500, -60], [1850, 380]]) add('stone', x, z, { small: 1, r: 34, sq: 0.8 });
   for (const [x, z] of [[-420, -700], [640, -1500], [-760, -1500], [-1250, -2050], [1250, -700], [2150, 150], [-900, 500]]) add('shroom', x, z, { small: 1, n: 3 + ((sr() * 3) | 0), reg: -1 + ((sr() * 4) | 0) });
   for (const [x, z] of [[-300, -1250], [-1150, -1950], [1500, 500], [2600, -400], [-1700, 100]]) add('flies', x, z, { n: 12, y0: 110 });
@@ -124,16 +126,16 @@ function ripple(x, z, a) { ripples.push({ x, z, t0: V.T, a: a || 1 }); }
 const sm = x => x * x * (3 - 2 * x);
 function drawTree(it) {
   const rx = CAM.cy, rz = CAM.sy, fx = -CAM.sy, fz = CAM.cy, H = it.h, T = V.T, dt = V.dt || 0.016, id = TID + it.idx * 8;
-  { const dx = it.x - CAM.x, dz = it.z - CAM.z, fw = dx * CAM.sy - dz * CAM.cy, rt = Math.abs(dx * CAM.cy + dz * CAM.sy); if (fw > 0 && (rt - 330) * CAM.f / fw > G.S.halfU + 6) { it.tg = it.awake || glowL(it.x, it.z) > 0.04 ? 1 : 0; it.g = clamp(it.g + clamp(it.tg - it.g, -dt * 0.1, dt * 0.13), 0, 1); return false; } } // out of view: it keeps growing, but is not drawn
+  { const dx = it.x - CAM.x, dz = it.z - CAM.z, fw = dx * CAM.sy - dz * CAM.cy, rt = Math.abs(dx * CAM.cy + dz * CAM.sy); if (fw > 0 && (rt - 330) * CAM.f / fw > G.S.halfU + 6) { it.tg = it.awake || glowL(it.x, it.z) > 0.04 ? 1 : 0; it.g = clamp(it.g + clamp(it.tg - it.g, -dt * 0.1, dt * (it.awake ? 0.45 : 0.13)), 0, 1); return false; } } // out of view: it keeps growing, but is not drawn
   it.tg = it.awake || glowL(it.x, it.z) > 0.04 ? 1 : 0; // a flower in bloom wakes the trees within about 370 of it
-  it.g = clamp(it.g + clamp(it.tg - it.g, -dt * 0.1, dt * 0.13), 0, 1);
+  it.g = clamp(it.g + clamp(it.tg - it.g, -dt * 0.1, dt * (it.awake ? 0.45 : 0.13)), 0, 1);
   const g = it.g, base = Math.max(it.lit, g * 0.9) + it.flash * 0.5; if (base < 0.03) return false;
   const w = Flora.wind(it.x * 0.05, T), lx = Math.cos(it.la) * it.lean, lz = Math.sin(it.la) * it.lean;
   G.lit[id + 1] = Math.min(1.25, base * 1.5);
   const th0 = Math.atan2(fz, fx), ownT = (id + 1) << 8;
   const any = surf(18, 16, (i, j) => { // the half of the trunk that faces you; ridges and furrows stay where they are on the tree
     const y = H * i / 18, t = y / H, th = th0 + (j / 16 - 0.5) * 2.8, rid = Math.sin(th * 9 + it.idx) + 0.5 * Math.sin(th * 23 + y * 0.03 + it.idx * 2), R = it.r * (1 + 1.3 * Math.exp(-y / 22)) * (1 - 0.3 * t) * (1 + 0.055 * rid), c = Math.cos(th), sn = Math.sin(th), d = -0.5 * Math.cos(th * 9 + it.idx) - 0.6 * Math.cos(th * 23 + y * 0.03 + it.idx * 2);
-    WX = it.x + lx * t * t + c * R; WY = y; WZ = it.z + lz * t * t + sn * R; NX = c - sn * d; NY = 0.05; NZ = sn + c * d; WV = th * 0.8; }, MAT.bark, ownT);
+    WX = it.x + lx * t * t + c * R; WY = y; WZ = it.z + lz * t * t + sn * R; NX = c - sn * d; NY = 0.05; NZ = sn + c * d; WV = th * 0.8; }, it.awake ? MAT.barkUp : MAT.bark, ownT);
   for (let q = 0; q < 5; q++) { // roots reach into the ground
     const a = it.la + q * 1.26 + 0.4 * Math.sin(it.idx + q), c = Math.cos(a), sn = Math.sin(a), L = it.r * (2.6 + 1.2 * Math.sin(it.idx * 3 + q * 2)); if (c * fx + sn * fz < -0.35) continue;
     let ok = PR.proj(it.x + c * it.r * 1.5, 30, it.z + sn * it.r * 1.5), pu = PR.u, pv = PR.v, pz = PR.z, ps = PR.s;
@@ -232,7 +234,7 @@ function drawItems(dt) {
       if (it.tiny) { if (begin(it)) { it.su = cu0; DRAW[it.type](it); } }
       else { DRAW[it.type](it); if (PR.proj(it.x, 60, it.z)) it.su = PR.u; }
     } else it.su = (it.x - CAM.x) * CAM.cy + (it.z - CAM.z) * CAM.sy > 0 ? 80 : -80;
-    if (it.awake && !it.gone && d < 2400 && (it.band || 'tree reed pad lamp shroom menhir'.includes(it.type))) band.push(it);
+    if (it.awake && !it.gone && d < 2400 && (it.band || 'tree reed pad lamp shroom menhir fire'.includes(it.type))) band.push(it);
   }
   for (let i = embers.length - 1; i >= 0; i--) { const e = embers[i]; e.age += dt; if (e.age > e.life) { embers.splice(i, 1); continue; } e.x += (e.vx + Math.sin(T * 2.6 + e.sd) * 12) * dt; e.y += e.vy * dt; const k = e.age / e.life; if (PR.proj(e.x, e.y, e.z)) G.plot(PR.u, PR.v, PR.z, k < 0.3 ? COL.fireY : k < 0.65 ? COL.fireO : COL.fireR, k < 0.3 ? '*' : k < 0.6 ? "'" : '.', 1 - k); }
   return band;
